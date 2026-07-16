@@ -1,0 +1,315 @@
+library(readxl)
+# Import data
+Tesla <- read_excel("C:/Users/Adiah Benjamin/OneDrive/Desktop/Dataset/Tesla.xlsx")
+# Compute log returns
+Tesla_Return <- c(NA, diff(log(Tesla$`Close`)))
+# Remove NA values
+Tesla_Return <- na.omit(Tesla_Return)
+#length 
+length(Tesla_Return)
+max(Tesla_Return, na.rm = TRUE)
+min(Tesla_Return, na.rm = TRUE)
+mean(Tesla_Return, na.rm = TRUE)
+sd(Tesla_Return, na.rm = TRUE)
+
+library(e1071)
+kurtosis(Tesla_Return, na.rm = TRUE)
+skewness(Tesla_Return, na.rm = TRUE)
+
+#normality test 1
+library(ADGofTest)
+mu <- mean(Tesla_Return, na.rm = TRUE)
+sdv <- sd(Tesla_Return, na.rm = TRUE)
+
+#anderson
+ad.test(Tesla_Return, distr.fun = pnorm, mu,sdv)
+#komogorov
+ks.test(Tesla_Return,"pnorm", mu, sdv)
+#shapiro
+shapiro.test(Tesla_Return)
+
+#plot of Tesla 
+qqnorm(Tesla_Return, main = 'Tesla Return')
+qqline(Tesla_Return, col='red')
+plot(Tesla_Return, main = 'Tesla Return')
+hist(Tesla_Return, main = 'Tesla Return')
+
+#Negative 
+Negative <- -Tesla_Return[Tesla_Return < 0]
+length(Negative)
+library(evir)
+me_tsla <- meplot(Negative, plot = FALSE)
+
+plot(me_tsla$x, me_tsla$y,
+     type = "l",
+     lwd = 2,
+     main = "Tesla Mean Excess Plot for Losses",
+     xlab = "Threshold",
+     ylab = "Mean Excess")
+
+grid()
+candidates <- c(0.04500, 0.05500)
+sapply(candidates, function(u) sum(Negative > u, na.rm = TRUE))
+abline(v = candidates,
+       col = c("red"),
+       lty = 3,
+       lwd = 2)
+#Add legend
+legend("topright",
+       legend = c("0.04500", "0.05500"),
+       col = c("red"),
+       lty = 3,
+       lwd = 2,
+       bty = "n")
+threshold <- c(0.05000)
+x <- threshold[1]
+abline(v = x, 
+       col=c("blue"), 
+       lwd = 2)
+#fit gpd on loss
+library(evd)
+library(POT)
+exceedances <- Negative[Negative > x] - x
+length(exceedances)  
+x <- 0.05000
+GPDNegative <- fitgpd(
+  Negative,
+  threshold = x,
+  est = "mle"
+)
+
+summary(GPDNegative)
+GPDNegative$fitted.values
+GPDNegative$std.err
+GPDNegative$param
+par(mfrow = c(2,2))
+plot(GPDNegative)
+
+#Parameter Stability 
+tcplot(Negative,
+       nt = 40)
+#Goodness of fit test
+AD.stat <- function(x, shape, scale){
+  
+  x <- sort(x)
+  n <- length(x)
+  
+  F <- pgpd(x,
+            loc = 0,
+            scale = scale,
+            shape = shape)
+  
+  eps <- 1e-10
+  F[F < eps] <- eps
+  F[F > 1 - eps] <- 1 - eps
+  
+  i <- 1:n
+  
+  A2 <- -n -
+    (1/n) * sum((2*i-1) *
+                  (log(F) + log(1-rev(F))))
+  
+  return(A2)
+}
+shape <- GPDNegative$param["shape"]
+scale <- GPDNegative$param["scale"]
+
+obs.AD <- AD.stat(exceedances, shape, scale)
+obs.AD
+set.seed(123)
+
+B <- 10000
+boot.AD <- numeric(B)
+
+n <- length(exceedances)
+
+for(i in 1:B){
+  
+  sim <- rgpd(n,
+              loc = 0,
+              scale = scale,
+              shape = shape)
+  
+  fit <- fitgpd(sim,
+                threshold = 0,
+                est = "mle")
+  
+  shape.b <- fit$param["shape"]
+  scale.b <- fit$param["scale"]
+  
+  boot.AD[i] <- AD.stat(sim,
+                        shape.b,
+                        scale.b)
+}
+p.boot <- mean(boot.AD >= obs.AD)
+p.boot
+
+
+xi <- GPDNegative$param["shape"]
+sigma <- GPDNegative$param["scale"]
+
+N <- length(Negative)
+n <- length(exceedances)
+
+alpha <- c(0.90, 0.95, 0.99)
+
+VaR_TSLA <- x + (sigma/xi) *
+  (((N/n)*(1-alpha))^(-xi) - 1)
+
+VaR_TSLA
+ES_TSLA <- (VaR_TSLA + sigma - xi*x) / (1 - xi)
+
+ES_TSLA
+
+
+
+#Positive
+Positive <- Tesla_Return[Tesla_Return > 0]
+length(Positive)
+
+library(evir)
+me_tsla_pos <- meplot(Positive, plot = FALSE)
+
+plot(me_tsla_pos$x, me_tsla_pos$y,
+     type = "l",
+     lwd = 2,
+     main = "Tesla Mean Excess Plot for Gains",
+     xlab = "Threshold",
+     ylab = "Mean Excess")
+
+grid()
+
+# Candidate thresholds (Edit these if needed)
+candidates <- c(0.03500, 0.04500)
+
+sapply(candidates, function(u) sum(Positive > u, na.rm = TRUE))
+
+abline(v = candidates,
+       col = "red",
+       lty = 3,
+       lwd = 2)
+#Add legend
+legend("topright",
+       legend = c("0.03500", "0.04500"),
+       col = c("red"),
+       lty = 3,
+       lwd = 2,
+       bty = "n")
+threshold <- c(0.04000)
+a <- threshold[1]
+
+abline(v = a,
+       col = "blue",
+       lwd = 2)
+
+# Fit GPD to gains
+library(evd)
+library(POT)
+
+exceedances <- Positive[Positive > a] - a
+length(exceedances)
+
+a <- 0.04000
+
+GPDPositive <- fitgpd(
+  Positive,
+  threshold = a,
+  est = "mle"
+)
+
+summary(GPDPositive)
+GPDPositive$fitted.values
+GPDPositive$std.err
+GPDPositive$param
+
+par(mfrow = c(2,2))
+plot(GPDPositive)
+
+# Parameter Stability
+tcplot(Positive,
+       nt = 40)
+
+# Goodness of Fit Test
+AD.stat <- function(x, shape, scale){
+  
+  x <- sort(x)
+  n <- length(x)
+  
+  F <- pgpd(x,
+            loc = 0,
+            scale = scale,
+            shape = shape)
+  
+  eps <- 1e-10
+  F[F < eps] <- eps
+  F[F > 1 - eps] <- 1 - eps
+  
+  i <- 1:n
+  
+  A2 <- -n -
+    (1/n) * sum((2*i-1) *
+                  (log(F) + log(1-rev(F))))
+  
+  return(A2)
+}
+
+shape <- GPDPositive$param["shape"]
+scale <- GPDPositive$param["scale"]
+
+obs.AD <- AD.stat(exceedances,
+                  shape,
+                  scale)
+
+obs.AD
+
+set.seed(123)
+
+B <- 10000
+boot.AD <- numeric(B)
+
+n <- length(exceedances)
+
+for(i in 1:B){
+  
+  sim <- rgpd(n,
+              loc = 0,
+              scale = scale,
+              shape = shape)
+  
+  fit <- fitgpd(sim,
+                threshold = 0,
+                est = "mle")
+  
+  shape.b <- fit$param["shape"]
+  scale.b <- fit$param["scale"]
+  
+  boot.AD[i] <- AD.stat(sim,
+                        shape.b,
+                        scale.b)
+}
+
+p.boot <- mean(boot.AD >= obs.AD)
+p.boot
+
+
+
+
+
+# VaR and ES
+xi <- GPDPositive$param["shape"]
+sigma <- GPDPositive$param["scale"]
+
+N <- length(Positive)
+n <- length(exceedances)
+
+alpha <- c(0.90, 0.95, 0.99)
+
+VaR_TSLA_Gain <- a + (sigma/xi) *
+  (((N/n)*(1-alpha))^(-xi) - 1)
+
+VaR_TSLA_Gain
+
+ES_TSLA_Gain <- (VaR_TSLA_Gain + sigma - xi*a) / (1 - xi)
+
+ES_TSLA_Gain
+
