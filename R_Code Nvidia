@@ -1,0 +1,327 @@
+library(readxl)
+library(ggplot2)
+
+# Import data
+data <- read_excel("C://Users//Adiah Benjamin//OneDrive//Desktop//Dataset//NVIDIA dataset.xlsx")
+
+# Compute log returns
+Return <- c(NA, diff(log(data$`Clossing Price`)))
+
+# Remove NA values
+Return <- na.omit(Return)
+
+
+length(Return)
+max(Return, na.rm = TRUE)
+min(Return, na.rm = TRUE)
+mean(Return, na.rm = TRUE)
+sd(Return, na.rm = TRUE)
+
+library(e1071)
+kurtosis(Return, na.rm = TRUE)
+skewness(Return, na.rm = TRUE)
+
+#normality test 1
+library(ADGofTest)
+mu <- mean(Return, na.rm = TRUE)
+sdv <- sd(Return, na.rm = TRUE)
+
+#anderson
+ad.test(Return, distr.fun = pnorm, mu,sdv)
+#komogorov
+ks.test(Return,"pnorm", mu, sdv)
+#shapiro
+shapiro.test(Return)
+
+#qq plot
+qqnorm(Return, main = 'Nvidia Return')
+qqline(Return, col='red')
+plot(Return, main = 'Nvidia Return')
+hist(Return, main = 'Nvidia Return')
+
+#stationarity
+library(tseries)
+adf.test(Return[!is.na(Return)])
+pp.test(Return[!is.na(Return)])
+kpss.test(Return[!is.na(Return)])
+
+#Loss
+downside <- -Return[Return < 0]
+length(downside)
+library(evir)
+me <- meplot(downside, plot = FALSE)
+
+plot(me$x, me$y,
+     type = "l",
+     lwd = 2,
+     xlab = "Threshold",
+     ylab = "Mean Excess",
+     main = "Nvidia Mean Excess Plot for Losses")
+grid()
+
+candidates <- c(0.05712, 0.06812)
+sapply(candidates, function(u) sum(downside > u, na.rm = TRUE))
+abline(v = candidates,
+       col = c("red"),
+       lty = 3,
+       lwd = 2)
+#Add legend
+legend("bottomright",
+       legend = c("0.05712","0.06812"),
+       col = "red",
+       lty = 3,
+       lwd = 2,
+       bty = "n")
+
+threshold <- c(0.06010)
+x <- threshold[1]
+abline(v = x, 
+       col=c("blue"), 
+       lwd = 2)
+
+
+
+
+#fit gpd on loss
+library(evd)
+library(POT)
+exceedances <- downside[downside > x] - x
+length(exceedances) 
+x 
+GPDdownside <- fitgpd(
+  downside,
+  threshold = x,
+  est = "mle"
+)
+summary(GPDdownside)
+GPDdownside$fitted.values
+GPDdownside$std.err
+GPDdownside$param
+par(mfrow = c(2,2))
+plot(GPDdownside)
+#Parameter Stability 
+tcplot(downside,
+       
+       nt = 40)
+grid()
+#Goodness of fit test
+# Anderson-Darling statistic
+AD.stat <- function(x, shape, scale){
+  
+  x <- sort(x)
+  n <- length(x)
+  
+  # Fitted GPD CDF
+  F <- pgpd(x,
+            loc = 0,
+            scale = scale,
+            shape = shape)
+  
+# Avoid log(0)
+eps <- 1e-10
+F[F < eps] <- eps
+F[F > 1 - eps] <- 1 - eps
+  
+i <- 1:n
+  
+A2 <- -n -
+  (1/n) * sum((2*i-1) *
+                (log(F) + log(1-rev(F))))
+  
+  return(A2)
+}
+shape <- GPDdownside$param["shape"]
+scale <- GPDdownside$param["scale"]
+
+obs.AD <- AD.stat(exceedances, shape, scale)
+
+obs.AD
+
+set.seed(123)
+B <- 10000
+
+boot.AD <- numeric(B)
+
+n <- length(exceedances)
+for(i in 1:B){
+  
+# Generate bootstrap sample
+  sim <- rgpd(n,
+              loc = 0,
+              scale = scale,
+              shape = shape)
+  
+# Refit GPD
+  fit <- fitgpd(sim,
+                threshold = 0,
+                est = "mle")
+  
+  shape.b <- fit$param["shape"]
+  scale.b <- fit$param["scale"]
+  
+# Compute AD statistic
+  boot.AD[i] <- AD.stat(sim,
+                        shape.b,
+                        scale.b)
+}
+p.boot <- mean(boot.AD >= obs.AD)
+p.boot
+
+
+
+# Threshold
+x 
+
+# Sample size
+N <- length(downside)
+
+# Number of exceedances
+n <- length(exceedances)
+
+# Estimated parameters
+xi <- GPDdownside$param["shape"]
+sigma <- GPDdownside$param["scale"]
+alpha <- c(0.90, 0.95, 0.99)
+
+#VAR
+VaR <- x + (sigma/xi) *
+  (((N/n)*(1-alpha))^(-xi) - 1) 
+VaR
+
+#ES
+ES <- (VaR + sigma - xi*x) / (1 - xi) 
+ES
+
+
+
+
+
+#Gains
+gainside <- Return[Return > 0]
+length(gainside)
+me1 <- meplot(gainside, plot = FALSE)
+plot(me1$x, me1$y,
+     type = "l",
+     lwd = 2,
+     xlab = "Threshold",
+     ylab = "Mean Excess",
+     main = "Nvidia Mean Excess Plot for Gains")
+
+grid()
+candidates1 <- c(0.0550, 0.0650)
+sapply(candidates1, function(u) sum(gainside > u, na.rm = TRUE))
+abline(v = candidates1,
+       col = c( "red"),
+       lty = 3,
+       lwd = 2)
+#Add legend
+legend("bottomright",
+       legend = c("0.0550", "0.0650"),
+       col = c("red"),
+       lty = 3,
+       lwd = 2,
+       bty = "n")
+Threshold <- c(0.06000)
+a <- Threshold[1]
+abline(v = a, 
+       col=c("green"), 
+       lwd = 2)
+
+#fit gpd on gain
+a <- 0.06000
+excee <- gainside[gainside > a] - a
+length(excee)  
+
+
+GPDgainside <- fitgpd(
+  gainside,
+  threshold = a,
+  est = "mle"
+)
+ 
+
+summary(GPDgainside)
+GPDgainside$fitted.values
+GPDgainside$std.err
+GPDgainside$param
+par(mfrow = c(2,2))
+plot(GPDgainside)
+#Parameter Stability 
+tcplot(gainside,
+       nt = 40)
+
+#Goodness of fit test
+# Anderson-Darling statistic
+AD.stat <- function(x, shape, scale){
+  
+  x <- sort(x)
+  n <- length(x)
+  
+  F <- pgpd(x,
+            loc = 0,
+            scale = scale,
+            shape = shape)
+  
+  eps <- 1e-10
+  F[F < eps] <- eps
+  F[F > 1 - eps] <- 1 - eps
+  
+  i <- 1:n
+  
+  A2 <- -n -
+    (1/n) * sum((2*i-1) *
+                  (log(F) + log(1-rev(F))))
+  
+  return(A2)
+}
+shape <- GPDgainside$param["shape"]
+scale <- GPDgainside$param["scale"]
+
+obs.AD <- AD.stat(excee, shape, scale)
+obs.AD
+set.seed(123)
+
+Q <- 10000
+boot.AD <- numeric(Q)
+n <- length(excee)
+
+for(i in 1:Q){
+  
+  sim <- rgpd(n,
+              loc = 0,
+              scale = scale,
+              shape = shape)
+  
+  fit <- fitgpd(sim,
+                threshold = 0,
+                est = "mle")
+  
+  shape.b <- fit$param["shape"]
+  scale.b <- fit$param["scale"]
+  
+  boot.AD[i] <- AD.stat(sim,
+                        shape.b,
+                        scale.b)
+}
+p.boot <- mean(boot.AD >= obs.AD)
+p.boot
+
+boot.AD.plot <- boot.AD[boot.AD <= quantile(boot.AD, 0.99)]
+
+xi_g <- GPDgainside$param["shape"]
+sigma_g <- GPDgainside$param["scale"]
+
+N_g <- length(gainside)
+n_g <- length(excee)
+
+alpha <- c(0.90, 0.95, 0.99)
+
+VaR_gain <- a + (sigma_g/xi_g) *
+  (((N_g/n_g)*(1-alpha))^(-xi_g) - 1)
+
+VaR_gain
+
+
+ES_gain <- (VaR_gain + sigma_g - xi_g*a) / (1 - xi_g)
+
+ES_gain
